@@ -1,0 +1,85 @@
+name: Watch Bandai OPTCG events
+
+on:
+  schedule:
+    # Every 10 minutes (GitHub may delay runs 5-20 min at busy times).
+    # If your repo is PRIVATE, change to "*/30 * * * *" to stay in the free minutes.
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}   # adds a "Run workflow" button for manual tests
+
+permissions:
+  contents: write         # save snapshots back to the repo
+  actions: write          # keepalive: reset GitHub's 60-day inactivity timer
+
+concurrency:
+  group: optcg-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      DISCORD_MENTION: ${{ secrets.DISCORD_MENTION }}
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check pages
+        run: python monitor.py
+
+      - name: Save snapshots
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add snapshots
+          if ! git diff --cached --quiet; then
+            git commit -m "Update snapshots"
+            git pull --rebase --quiet && git push
+          fi
+
+      # Backup reporter: if anything above crashed (script error, git push failure,
+      # GitHub hiccup), tell Discord. Only reports the FIRST failure in a row, so a
+      # persistent problem doesn't ping you every 10 minutes.
+      - name: Report failure to Discord
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          prev=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow watch.yml --limit 2 \
+                   --json conclusion --jq '.[1].conclusion' 2>/dev/null || echo "")
+          if [ "$prev" = "failure" ]; then
+            echo "Previous run also failed; already reported."
+            exit 0
+          fi
+          python3 - <<'EOF'
+          import json, os, urllib.request
+          msg = ("⚠️ **The OPTCG watcher crashed.** Alerts may be delayed or missed until it's fixed.\n"
+                 f"Run log: <{os.environ['RUN_URL']}>\n"
+                 "**What to do:** open the log and look at the red step. If it's a one-off GitHub "
+                 "hiccup, you'll get no more messages. If it keeps failing, paste the error to Claude. "
+                 "_(You'll only get this once per streak of failures.)_")
+          hook, topic = os.environ.get("DISCORD_WEBHOOK_URL"), os.environ.get("NTFY_TOPIC")
+          if hook:
+              try:
+                  urllib.request.urlopen(urllib.request.Request(hook, method="POST",
+                      data=json.dumps({"content": msg, "username": "OPTCG Event Watch"}).encode(),
+                      headers={"Content-Type": "application/json", "User-Agent": "optcg-watch"}), timeout=30)
+              except Exception as e:
+                  print("Discord failed:", e)
+          if topic:
+              try:
+                  urllib.request.urlopen(urllib.request.Request(f"https://ntfy.sh/{topic}", method="POST",
+                      data=msg.replace("**", "").encode(), headers={"Title": "OPTCG watcher crashed",
+                      "Click": os.environ["RUN_URL"]}), timeout=30)
+              except Exception as e:
+                  print("ntfy failed:", e)
+          EOF

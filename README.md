@@ -4,18 +4,35 @@ Checks Bandai's One Piece Card Game event pages about every 10 minutes and pings
 your phone through Discord and/or ntfy when they change. It's free and runs on
 GitHub, so your computer doesn't need to be on.
 
-Watched by default:
-- https://en.onepiece-cardgame.com/events/ (new tournaments, new Regionals season pages)
-- https://en.onepiece-cardgame.com/events/regional-season2-26-27.html (new regionals and registration links)
+## What it watches
+
+It starts at the events page (https://en.onepiece-cardgame.com/events/) and follows every
+link to another event page, up to two clicks deep. That covers every event type: Championships,
+Regionals, Finals, Last Chance Qualifiers, Extra Grand Battle, Treasure Cups, Store Championships,
+Store Tournaments, Heroines Battle, Fests, release events and so on. It watches each of those pages for changes.
+
+- **A new event appears** (e.g. a new Treasure Cup or Extra Battle) → alert with a preview and
+  any registration links, and that page is watched from then on.
+- **A new sub-page appears** (e.g. Championship → *Regionals Season 3*) → same: alert and auto-watch.
+  New regionals added to that page later trigger their own alerts.
+- **Something on an existing page changes** (new regional row, registration link, dates) → alert
+  showing what was added or removed.
+- **A page is taken down** → it's quietly dropped, with a short note.
+
+The "Past Events" archive is skipped on purpose.
 
 ## What an alert looks like
 
 ```
-Events page changed
-🚨 NEW EVENT PAGE(S):
-• Regionals Season 3 -> https://en.onepiece-cardgame.com/events/regional-season3-26-27.html
-➕ Added:
-• Jan 9, 2027 | Top Cut | Peoria Civic Center ... | Link
+Championship 26-27 changed
+🚨 Links to event pages added:
+• Regionals Season 3 -> .../events/regional-season3-26-27.html (🆕 now watching, preview below)
+
+🆕 New event page found: now watching
+Regionals Season 3
+• Registration opens Jan 10
+• Feb 7 | Top Cut | Seattle Convention Center | Link
+🔗 Link -> https://rk9.gg/...
 ```
 
 ## Setup (about 10 minutes)
@@ -46,16 +63,20 @@ Events page changed
 Within a minute you should get a "✅ Now watching…" message for each page. After that you only hear
 from it when something changes.
 
-## Watching more pages
-Edit the `PAGES` list at the top of `monitor.py`. When Bandai posts a Season 3 regionals page,
-the watcher flags it as a NEW EVENT PAGE. Add it to `PAGES` so its regionals are tracked too.
+## Tuning
+Settings at the top of `monitor.py`:
+- `SEED_PAGES`: pages that are always watched, even if nothing links to them.
+- `MAX_DEPTH` (2) and `MAX_PAGES` (80): how far to follow links and how many pages to watch.
+  You get a message if the page limit is hit.
+- `EXCLUDE_RE`: URL patterns never to follow (the past-events archive by default).
+- `IGNORE_RE`: text to ignore if small edits cause noisy alerts.
 
 ## What it tells you in Discord (besides changes)
 
 | Situation | What you get |
 |---|---|
 | Bandai blocks GitHub (403), shows a captcha, or the page comes back empty | ⚠️ after 30 min, with the likely cause and what to do; a reminder every 24 h; ✅ when it recovers |
-| A watched page is removed or renamed (404) | ⚠️ telling you to find the new URL and update `PAGES` |
+| A page is removed from Bandai's site | 🗑️ short note; it stops being watched (a ⚠️ only if a page that's still linked breaks) |
 | Bandai's site is down or slow | ⚠️ after 30 min ("nothing to do"), then ✅ when it's back |
 | Bandai redesigns a page | A warning inside the change alert that later alerts may be noisy |
 | GitHub's 60-day inactivity pause | Prevented automatically: the watcher resets the timer daily. If that stops working for 7 days, ⚠️ with the deadline and how to fix it |

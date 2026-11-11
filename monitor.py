@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 """Watch Bandai's One Piece Card Game event pages and alert on changes.
 
+How it works
+  * Starts from SEED_PAGES (the events index, plus any page you always want watched).
+  * Follows every link to another event page on Bandai's site, up to MAX_DEPTH
+    clicks away (events index -> event page -> sub-page such as a regionals season),
+    and watches all of them. Store events, Extra/Grand Battles, Treasure Cups,
+    Championships, Regionals, etc. are all covered automatically.
+  * When a brand-new event page shows up (e.g. "Regionals Season 3"), you get an
+    alert with a preview, and from then on changes to that page are alerted too.
+  * Pages that disappear from the site for DROP_AFTER_DAYS stop being watched.
+
 Everything is reported to Discord (and/or ntfy), including problems:
-  * page changes (new events, new regionals, new registration links)
-  * Bandai blocking or failing to serve a page (after it lasts FAIL_ALERT_MINUTES),
-    with a reminder every REMIND_HOURS while it continues, and an "all clear"
-  * the GitHub 60-day auto-disable: the script keeps the workflow alive daily via
-    GitHub's API and tells you if that ever stops working
+  * Bandai blocking or failing to serve pages (after FAIL_ALERT_MINUTES), with a
+    reminder every REMIND_HOURS while it continues, and an all-clear
+  * the GitHub 60-day auto-disable: kept alive daily via GitHub's API, and you're
+    told if that stops working
   * a weekly check-in, so if you stop hearing from it you know it's down
 
 Uses only the Python standard library, so there is nothing to install.
@@ -32,14 +41,21 @@ import urllib.request
 from html.parser import HTMLParser
 from pathlib import Path
 
-# ---- Pages to watch. Add more lines here any time. ---------------------------
-PAGES = {
-    "Events page": "https://en.onepiece-cardgame.com/events/",
-    "Regionals Season 2 (26-27)": "https://en.onepiece-cardgame.com/events/regional-season2-26-27.html",
+# ---- Settings ----------------------------------------------------------------
+# Pages that are always watched (never dropped). Everything else is discovered.
+SEED_PAGES = {
+    "https://en.onepiece-cardgame.com/events/": "Events page",
+    "https://en.onepiece-cardgame.com/events/regional-season2-26-27.html": "Regionals Season 2 (26-27)",
 }
-# Links matching this are flagged as "NEW EVENT PAGE" when they first appear
-# (catches e.g. a Regionals Season 3 page being added to the events index).
-EVENT_LINK_RE = re.compile(r"onepiece-cardgame\.com/events/.+", re.I)
+SITE_HOST = "en.onepiece-cardgame.com"
+EVENT_PATH_PREFIX = "/events/"   # only pages under this path are followed
+# Never follow these (the "Past Events" archive would add dozens of finished events).
+EXCLUDE_RE = re.compile(r"list_end", re.I)
+MAX_DEPTH = 2          # clicks away from a seed page to follow
+MAX_PAGES = 80         # safety cap on how many pages to watch
+REQUEST_GAP = 1.0      # seconds between page requests (be polite to Bandai)
+DROP_AFTER_DAYS = 3    # stop watching a page after it's unlinked this long
+
 # Text lines matching this are ignored (cookie banners, copyright year, etc.).
 IGNORE_RE = re.compile(r"^(©|copyright)", re.I)
 
@@ -58,7 +74,7 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 BLOCK_TAGS = {"p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5",
               "h6", "br", "section", "article", "dt", "dd", "table", "ul", "ol"}
 CELL_TAGS = {"td", "th"}  # table cells are joined with " | " on one line
-SKIP_TAGS = {"script", "style", "noscript", "svg", "template"}
+SKIP_TAGS = {"script", "style", "noscript", "svg", "template", "title"}
 NOTIFY_FAILED = False
 
 
@@ -94,16 +110,59 @@ def actions_url():
     return f"{srv}/{repo}/actions" if srv and repo else "your repo's Actions tab"
 
 
-# ---- Page parsing ----------------------------------------------------------
+# ---- URLs --------------------------------------------------------------------
+def normalize(url):
+    p = urllib.parse.urlsplit(url)
+    path = p.path or "/"
+    if path.endswith("/index.html"):
+        path = path[:-len("index.html")]
+    return urllib.parse.urlunsplit(("https", p.netloc.lower(), path, p.query, ""))
+
+
+def is_event_page(url):
+    p = urllib.parse.urlsplit(url)
+    if p.netloc.lower() != SITE_HOST or not p.path.startswith(EVENT_PATH_PREFIX):
+        return False
+    if p.path == EVENT_PATH_PREFIX or EXCLUDE_RE.search(url):
+        return False  # the index itself (it's a seed), or excluded
+    return p.path.endswith(("/", ".html", ".htm", ".php"))
+
+
+TAG_WORDS = ("OFFICIAL EVENTS", "Convention Event", "Regularly Held", "Official Shop Only",
+             "Large Scale", "Tournament", "Beginner", "Demo")
+
+
+def clean_label(label):
+    """'Tournament Treasure Cup Dec 2026 Event Period: ...' -> 'Treasure Cup Dec 2026'."""
+    name = re.split(r"\bEvent Period\b", label.replace("\u200b", ""))[0].strip()
+    changed = True
+    while changed:
+        changed = False
+        for w in TAG_WORDS:
+            if name.lower().startswith(w.lower() + " "):
+                name, changed = name[len(w):].strip(), True
+    return (name or label)[:80]
+
+
+def snap_key(url):
+    p = urllib.parse.urlsplit(url)
+    s = re.sub(r"[^a-z0-9]+", "-", (p.path + ("?" + p.query if p.query else "")).lower())
+    return s.strip("-") or "index"
+
+
+# ---- Page parsing ------------------------------------------------------------
 class PageParser(HTMLParser):
-    """Pull visible text (one line per block element) and all links."""
+    """Pull visible text (one line per block element), links, and the title."""
 
     def __init__(self, base_url):
         super().__init__(convert_charrefs=True)
         self.base = base_url
         self.lines, self.links = [], []
+        self.link_labels = {}           # absolute URL -> first non-empty label
+        self.title, self.h1 = "", ""
         self._buf, self._skip = [], 0
         self._href, self._atext = None, []
+        self._in_title = self._in_h1 = False
 
     def _flush(self):
         text = re.sub(r"\s+", " ", "".join(self._buf)).strip()
@@ -112,6 +171,10 @@ class PageParser(HTMLParser):
         self._buf = []
 
     def handle_starttag(self, tag, attrs):
+        if tag == "title":
+            self._in_title = True
+        if tag == "h1" and not self.h1:
+            self._in_h1 = True
         if tag in SKIP_TAGS:
             self._skip += 1
         elif tag in BLOCK_TAGS:
@@ -119,12 +182,19 @@ class PageParser(HTMLParser):
         elif tag in CELL_TAGS and not self._skip and "".join(self._buf).strip():
             self._buf.append(" | ")
         if tag == "a":
+            # Keep side-by-side links from running together ("Season 1Season 2").
+            if not self._skip and self._buf and not "".join(self._buf)[-1:].isspace():
+                self._buf.append(" · ")
             href = dict(attrs).get("href")
-            if href and not href.startswith(("javascript:", "mailto:", "#")):
+            if href and not href.startswith(("javascript:", "mailto:", "tel:", "#")):
                 self._href = urllib.parse.urljoin(self.base, href).split("#")[0]
                 self._atext = []
 
     def handle_endtag(self, tag):
+        if tag == "title":
+            self._in_title = False
+        if tag == "h1":
+            self._in_h1 = False
         if tag in SKIP_TAGS and self._skip:
             self._skip -= 1
         elif tag in BLOCK_TAGS:
@@ -132,9 +202,17 @@ class PageParser(HTMLParser):
         if tag == "a" and self._href:
             label = re.sub(r"\s+", " ", "".join(self._atext)).strip()
             self.links.append(f"{label} -> {self._href}" if label else self._href)
+            if label:
+                self.link_labels.setdefault(normalize(self._href), label)
+            else:
+                self.link_labels.setdefault(normalize(self._href), "")
             self._href = None
 
     def handle_data(self, data):
+        if self._in_title:
+            self.title += data
+        if self._in_h1:
+            self.h1 += data
         if self._skip:
             return
         self._buf.append(data)
@@ -187,9 +265,9 @@ def classify(err):
         if err.code == 404:
             return PageProblem(
                 "Page not found (HTTP 404)",
-                "Bandai probably moved or renamed this page (a season page may have been "
-                "replaced). Find the new URL on the events page and update `PAGES` in "
-                "`monitor.py`.")
+                "Bandai removed or renamed this page. Discovered pages are dropped "
+                "automatically after a few days. If it's one of the `SEED_PAGES` in "
+                "`monitor.py`, remove it or replace it with the new URL.")
         if err.code >= 500:
             return PageProblem(
                 f"Bandai's server error (HTTP {err.code})",
@@ -219,14 +297,12 @@ def extract(html, url):
         raise PageProblem("Page loaded but was almost empty",
                           hint + " Open it in a browser. If it looks normal there, "
                           "the watcher needs updating to read the new format.")
-    return data
+    event_links = {u: lbl for u, lbl in p.link_labels.items() if is_event_page(u)}
+    title = re.sub(r"\s+", " ", p.h1 or p.title).strip()
+    return data, event_links, title
 
 
-def slug(name):
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-
-
-# ---- Change reporting ------------------------------------------------------
+# ---- Change reporting --------------------------------------------------------
 def diff(old, new):
     added, removed = [], []
     for op in difflib.ndiff(old, new):
@@ -237,7 +313,7 @@ def diff(old, new):
     return added, removed
 
 
-def build_message(name, url, old, new):
+def build_message(name, url, old, new, newly_watched=()):
     add_l, rem_l = diff(old["lines"], new["lines"])
     old_links, new_links = set(old["links"]), set(new["links"])
     add_k = sorted(new_links - old_links)
@@ -249,11 +325,14 @@ def build_message(name, url, old, new):
     if old["lines"] and len(rem_l) > 0.6 * len(old["lines"]):
         parts.append("⚠️ Most of the page changed at once, so Bandai may have redesigned it. "
                      "If the next alerts look like noise, the watcher may need an update.")
-    event_pages = [k for k in add_k if EVENT_LINK_RE.search(k.split(" -> ")[-1])]
+    event_pages = [k for k in add_k if is_event_page(normalize(k.split(" -> ")[-1]))]
     if event_pages:
-        parts.append("🚨 **NEW EVENT PAGE(S):**\n" +
-                     "\n".join(f"• {k}" for k in event_pages[:10]) +
-                     "\n_Add new season pages to `PAGES` in `monitor.py` to watch them too._")
+        lines = []
+        for k in event_pages[:10]:
+            tag = (" _(🆕 now watching, preview below)_"
+                   if normalize(k.split(" -> ")[-1]) in newly_watched else "")
+            lines.append(f"• {k}{tag}")
+        parts.append("🚨 **Links to event pages added:**\n" + "\n".join(lines))
     other_links = [k for k in add_k if k not in event_pages]
     if other_links:
         parts.append("🔗 **New links** (often registration):\n" +
@@ -269,7 +348,26 @@ def build_message(name, url, old, new):
     return "\n\n".join(parts)
 
 
-# ---- Notifications ---------------------------------------------------------
+def new_page_message(pages, boilerplate):
+    """pages: list of (name, url, data). Preview skips site-wide menu/footer lines."""
+    parts = [f"🆕 **New event page{'s' if len(pages) > 1 else ''} found: now watching**"]
+    for name, url, data in pages[:6]:
+        body = [l for l in data["lines"] if l not in boilerplate][:8]
+        regs = [k for k in data["links"]
+                if urllib.parse.urlsplit(k.split(" -> ")[-1]).netloc.lower() != SITE_HOST][:5]
+        block = f"**{name}**\n<{url}>"
+        if body:
+            block += "\n" + "\n".join(f"• {l[:180]}" for l in body)
+        if regs:
+            block += "\n🔗 " + "\n🔗 ".join(regs)
+        parts.append(block)
+    if len(pages) > 6:
+        parts.append(f"…and {len(pages) - 6} more: " +
+                     ", ".join(n for n, _, _ in pages[6:20]))
+    return "\n\n".join(parts)
+
+
+# ---- Notifications -----------------------------------------------------------
 def post(url, data, headers):
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=30) as r:
@@ -278,6 +376,7 @@ def post(url, data, headers):
 
 def notify(title, body, click_url=None, ping=True):
     """Send to Discord and ntfy. Returns True if at least one succeeded."""
+    global NOTIFY_FAILED
     sent = False
     hook = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
     if hook:
@@ -307,42 +406,44 @@ def notify(title, body, click_url=None, ping=True):
         except Exception as e:  # noqa: BLE001
             print(f"ntfy send failed: {e}")
     if not sent:
-        global NOTIFY_FAILED
         NOTIFY_FAILED = True
         print("No notifier configured/succeeded. Message was:\n" + body)
     return sent
 
 
-# ---- Health checks ---------------------------------------------------------
-def handle_failure(name, url, ps, problem):
+# ---- Health checks -----------------------------------------------------------
+def report_failures(watch, failures):
+    """One combined message for every page whose failure is long enough and due."""
     t = now()
-    if not ps.get("fail_since"):
-        ps["fail_since"] = iso(t)
-    ps["last_error"] = problem.short
-    since = parse_t(ps["fail_since"])
-    last_alert = parse_t(ps.get("last_fail_alert"))
-    long_enough = t - since >= dt.timedelta(minutes=FAIL_ALERT_MINUTES)
-    due = last_alert is None or t - last_alert >= dt.timedelta(hours=REMIND_HOURS)
-    if long_enough and due:
-        prefix = "Still failing" if last_alert else "Can't check"
-        msg = (f"⚠️ **{prefix}: {name}** (for {ago(since)})\n<{url}>\n"
-               f"**Problem:** {problem.short}\n**What to do:** {problem.advice}\n"
-               f"_While this lasts, you won't get change alerts for this page. "
-               f"Next reminder in {REMIND_HOURS} h if it's still broken._")
-        if run_url():
-            msg += f"\nRun log: <{run_url()}>"
-        if notify(f"OPTCG watcher problem: {name}", msg, url):
-            ps["last_fail_alert"] = iso(t)
-
-
-def handle_recovery(name, url, ps):
-    if ps.get("last_fail_alert"):
-        notify(f"OPTCG watcher OK: {name}",
-               f"✅ **Back to normal: {name}**. The checks are working again "
-               f"(it was down for {ago(parse_t(ps['fail_since']))}).\n<{url}>",
-               url, ping=False)
-    for k in ("fail_since", "last_fail_alert", "last_error"):
-        ps.pop(k, None)
+    due = []
+    for url, problem in failures:
+        w = watch[url]
+        w.setdefault("fail_since", iso(t))
+        w["last_error"] = problem.short
+        since, last_alert = parse_t(w["fail_since"]), parse_t(w.get("last_fail_alert"))
+        if (t - since >= dt.timedelta(minutes=FAIL_ALERT_MINUTES) and
+                (last_alert is None or t - last_alert >= dt.timedelta(hours=REMIND_HOURS))):
+            due.append((url, problem))
+    if not due:
+        return
+    groups = {}
+    for url, problem in due:
+        groups.setdefault(problem.short, (problem, []))[1].append(url)
+    still = any(watch[u].get("last_fail_alert") for u, _ in due)
+    total = len(watch)
+    parts = [f"⚠️ **{'Still failing' if still else 'Can’t check'}: {len(due)} of {total} watched page(s)**"]
+    for short, (problem, urls) in groups.items():
+        names = "\n".join(f"• {watch[u]['name']} (for {ago(parse_t(watch[u]['fail_since']))}) <{u}>"
+                          for u in urls[:8])
+        more = f"\n…and {len(urls) - 8} more" if len(urls) > 8 else ""
+        parts.append(f"**Problem:** {short}\n{names}{more}\n**What to do:** {problem.advice}")
+    parts.append(f"_While this lasts you won't get change alerts for these pages. "
+                 f"Next reminder in {REMIND_HOURS} h if it's still broken._")
+    if run_url():
+        parts.append(f"Run log: <{run_url()}>")
+    if notify("OPTCG watcher problem", "\n\n".join(parts), due[0][0]):
+        for url, _ in due:
+            watch[url]["last_fail_alert"] = iso(t)
 
 
 def keepalive(state):
@@ -384,19 +485,25 @@ def keepalive(state):
             state["keepalive_warned"] = iso(t)
 
 
-def heartbeat(state, page_states):
+def heartbeat(state, watch):
     t = now()
     last = parse_t(state.get("last_heartbeat"))
     if last and t - last < dt.timedelta(days=HEARTBEAT_DAYS):
         return
-    lines = []
-    for name in PAGES:
-        ps = page_states.get(slug(name), {})
-        if ps.get("fail_since"):
-            lines.append(f"• {name}: ⚠️ failing ({ps.get('last_error', '?')})")
-        else:
-            lc = parse_t(ps.get("last_change"))
-            lines.append(f"• {name}: OK, last change {ago(lc) + ' ago' if lc else 'none yet'}")
+    failing = [w for w in watch.values() if w.get("fail_since")]
+    changed = sorted(((parse_t(w["last_change"]), w["name"]) for w in watch.values()
+                      if w.get("last_change")), reverse=True)
+    week_new = [w["name"] for w in watch.values()
+                if parse_t(w.get("found")) and t - parse_t(w["found"]) < dt.timedelta(days=7)
+                and not w.get("seed")]
+    lines = [f"• Watching **{len(watch)}** event pages"
+             f"{f', {len(failing)} failing' if failing else ', all OK'}"]
+    for w in failing[:5]:
+        lines.append(f"  ⚠️ {w['name']}: {w.get('last_error', '?')}")
+    if changed:
+        lines.append(f"• Most recent change: {changed[0][1]}, {ago(changed[0][0])} ago")
+    if week_new:
+        lines.append(f"• New pages this week: {', '.join(week_new[:8])}")
     ka, ka_try = parse_t(state.get("keepalive_ok")), parse_t(state.get("keepalive_last_try"))
     if ka_try and (not ka or ka_try > ka):
         lines.append(f"• GitHub keepalive: ⚠️ failing (last worked "
@@ -410,56 +517,162 @@ def heartbeat(state, page_states):
         state["last_heartbeat"] = iso(t)
 
 
-# ---- Main ------------------------------------------------------------------
+# ---- Main --------------------------------------------------------------------
 def main():
     SNAP_DIR.mkdir(exist_ok=True)
     state = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
-    first_ever = not state
     state.setdefault("created", iso(now()))
-    page_states = state.setdefault("pages", {})
+    state.pop("pages", None)                 # old (v1) format
+    bootstrap = "watch" not in state         # first run: baseline quietly
+    watch = state.setdefault("watch", {})
 
-    for name, url in PAGES.items():
-        print(f"Checking {name}: {url}")
-        key = slug(name)
-        ps = page_states.setdefault(key, {})
-        snap = SNAP_DIR / f"{key}.json"
+    seeds = {normalize(u): n for u, n in SEED_PAGES.items()}
+    for url, name in seeds.items():
+        w = watch.setdefault(url, {"found": iso(now())})
+        w.update(name=name, depth=0, seed=True)
+    for url, w in watch.items():             # un-seeded pages stop being seeds
+        if url not in seeds and w.pop("seed", None):
+            w["depth"] = 1
+
+    queue = sorted(watch, key=lambda u: (watch[u]["depth"], u))
+    seen, linked, failures, recovered = set(), set(), [], []
+    changes, new_pages, newly_watched = [], [], set()
+    page_data, cap_hit = {}, False
+
+    i = 0
+    while i < len(queue):
+        url = queue[i]
+        i += 1
+        if url in seen:
+            continue
+        seen.add(url)
+        w = watch[url]
+        if len(seen) > 1:
+            time.sleep(REQUEST_GAP)
+        print(f"Checking [{w['depth']}] {w['name']}: {url}")
         try:
-            new = extract(fetch(url), url)
+            data, event_links, title = extract(fetch(url), url)
         except PageProblem as p:
             print(f"  PROBLEM: {p.short}")
-            handle_failure(name, url, ps, p)
+            failures.append((url, p))
             continue
-        handle_recovery(name, url, ps)
-        if not snap.exists():
-            snap.write_text(json.dumps(new, indent=1, ensure_ascii=False))
-            notify(f"Now watching: {name}",
-                   f"✅ **Now watching {name}**\n<{url}>\n"
-                   f"({len(new['lines'])} text lines, {len(new['links'])} links saved as baseline)",
-                   url, ping=False)
-            continue
-        old = json.loads(snap.read_text())
-        msg = build_message(name, url, old, new)
-        if msg:
-            print("  CHANGED")
-            if notify(f"OPTCG: {name} changed", msg, url):
-                snap.write_text(json.dumps(new, indent=1, ensure_ascii=False))
-                ps["last_change"] = iso(now())
-            # If sending failed, keep the old snapshot so the alert retries next run.
-        else:
-            print("  no change")
+        page_data[url] = data
+        if w.get("last_fail_alert"):
+            recovered.append(url)
+        for k in ("fail_since", "last_fail_alert", "last_error"):
+            w.pop(k, None)
+        generic = {"learn more", "more", "details", "read more", "click here", "here", "view more"}
+        if title and not w.get("seed") and (not w.get("name") or w["name"].startswith("http")
+                                            or w["name"].lower() in generic):
+            w["name"] = title.replace("\u200b", "")[:80]
 
-    # Forget pages removed from PAGES.
-    for k in list(page_states):
-        if k not in {slug(n) for n in PAGES}:
-            del page_states[k]
+        # Discover linked event pages.
+        for link, label in event_links.items():
+            linked.add(link)
+            if link in watch:
+                if watch[link]["depth"] > w["depth"] + 1:
+                    watch[link]["depth"] = w["depth"] + 1
+                continue
+            if w["depth"] + 1 > MAX_DEPTH:
+                continue
+            if len(watch) >= MAX_PAGES:
+                cap_hit = True
+                continue
+            watch[link] = {"name": clean_label(label) if label else link, "depth": w["depth"] + 1,
+                           "found": iso(now()), "new": True}
+            newly_watched.add(link)
+            queue.append(link)
+            print(f"  discovered: {label or link}")
+
+        snap = SNAP_DIR / f"{snap_key(url)}.json"
+        if not snap.exists():
+            snap.write_text(json.dumps(data, indent=1, ensure_ascii=False))
+            if w.pop("new", False) and not bootstrap:
+                new_pages.append((w["name"], url, data))
+            continue
+        w.pop("new", None)
+        old = json.loads(snap.read_text())
+        changes.append((url, old, data))
+
+    # ---- Send change alerts (index first, then the rest).
+    for url, old, data in changes:
+        msg = build_message(watch[url]["name"], url, old, data, newly_watched)
+        if not msg:
+            print(f"  no change: {watch[url]['name']}")
+            continue
+        print(f"  CHANGED: {watch[url]['name']}")
+        if notify(f"OPTCG: {watch[url]['name']} changed", msg, url):
+            (SNAP_DIR / f"{snap_key(url)}.json").write_text(
+                json.dumps(data, indent=1, ensure_ascii=False))
+            watch[url]["last_change"] = iso(now())
+        # If sending failed, keep the old snapshot so the alert retries next run.
+
+    if new_pages:
+        boiler = set(page_data.get(next(iter(seeds)), {}).get("lines", []))
+        if not notify("OPTCG: new event page", new_page_message(new_pages, boiler),
+                      new_pages[0][1]):
+            for _, url, _ in new_pages:   # retry the announcement next run
+                watch[url]["new"] = True
+                (SNAP_DIR / f"{snap_key(url)}.json").unlink(missing_ok=True)
+
+    if bootstrap:
+        names = sorted(w["name"] for w in watch.values())
+        notify("OPTCG watcher started",
+               f"✅ **Now watching {len(watch)} event pages** (anything new on these, "
+               f"and any new event page linked from them, will be alerted):\n" +
+               "\n".join(f"• {n}" for n in names[:40]) +
+               (f"\n…and {len(names) - 40} more" if len(names) > 40 else ""),
+               ping=False)
+
+    if recovered:
+        notify("OPTCG watcher OK",
+               "✅ **Back to normal.** Checks are working again for: " +
+               ", ".join(watch[u]["name"] for u in recovered[:15]), ping=False)
+    removed_now = [u for u, p in failures
+                   if p.short.startswith("Page not found") and not watch[u].get("seed")
+                   and u not in linked]
+    failures = [(u, p) for u, p in failures if u not in removed_now]
+    report_failures(watch, failures)
+
+    if cap_hit and not state.get("cap_warned"):
+        if notify("OPTCG watcher: page limit",
+                  f"ℹ️ Found more than {MAX_PAGES} event pages, so some new ones aren't being watched. "
+                  f"Raise `MAX_PAGES` in `monitor.py` if you want them all.", ping=False):
+            state["cap_warned"] = iso(now())
+
+    # ---- Drop discovered pages that have been unlinked for a while.
+    # Only judge this on runs where every page loaded (otherwise links could be missing).
+    t, dropped = now(), []
+    for url in removed_now:
+        dropped.append(watch.pop(url)["name"])
+    if not failures:
+        for url in list(watch):
+            w = watch[url]
+            if w.get("seed") or url in linked:
+                w.pop("missing_since", None)
+                continue
+            w.setdefault("missing_since", iso(t))
+            if t - parse_t(w["missing_since"]) >= dt.timedelta(days=DROP_AFTER_DAYS):
+                dropped.append(w["name"])
+                del watch[url]
+    if dropped:
+        notify("OPTCG watcher: pages removed",
+               "🗑️ No longer listed on Bandai's site, so I stopped watching: " +
+               ", ".join(dropped[:20]), ping=False)
+
+    # Clean up snapshot files for pages no longer watched.
+    keep = {f"{snap_key(u)}.json" for u in watch} | {STATE_FILE.name}
+    for f in SNAP_DIR.glob("*.json"):
+        if f.name not in keep:
+            f.unlink()
 
     keepalive(state)
-    if first_ever:
-        state["last_heartbeat"] = iso(now())  # the "Now watching" messages count
+    if bootstrap:
+        state["last_heartbeat"] = iso(now())  # the "Now watching" message counts
     else:
-        heartbeat(state, page_states)
+        heartbeat(state, watch)
 
-    STATE_FILE.write_text(json.dumps(state, indent=1, sort_keys=True))
+    STATE_FILE.write_text(json.dumps(state, indent=1, sort_keys=True, ensure_ascii=False))
     if NOTIFY_FAILED:
         # Couldn't deliver an alert: fail the run so the workflow's backup
         # reporter (and, as a last resort, GitHub's email) kicks in.

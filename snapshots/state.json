@@ -2,9 +2,179 @@
  "created": "2026-11-11T22:22:41+00:00",
  "keepalive_last_try": "2026-11-11T22:22:44+00:00",
  "keepalive_ok": "2026-11-11T22:22:44+00:00",
- "last_heartbeat": "2026-11-11T22:22:45+00:00",
- "pages": {
-  "events-page": {},
-  "regionals-season-2-26-27": {}
+ "last_heartbeat": "2026-11-11T22:32:13+00:00",
+ "watch": {
+  "https://en.onepiece-cardgame.com/events/": {
+   "depth": 0,
+   "found": "2026-11-11T22:31:04+00:00",
+   "name": "Events page",
+   "seed": true
+  },
+  "https://en.onepiece-cardgame.com/events/02_452.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Store Tournament 2026 Vol. 4"
+  },
+  "https://en.onepiece-cardgame.com/events/02_553.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Store Treasure Cup 2026 December"
+  },
+  "https://en.onepiece-cardgame.com/events/2026/bcgfest26-27/dallas/": {
+   "depth": 2,
+   "found": "2026-11-11T22:31:33+00:00",
+   "name": "BCG Fest feat. ONE PIECE CARD GAME Dallas"
+  },
+  "https://en.onepiece-cardgame.com/events/2026/bcgfest26-27/utrecht/": {
+   "depth": 2,
+   "found": "2026-11-11T22:31:33+00:00",
+   "name": "BCG Fest feat. ONE PIECE CARD GAME Utrecht"
+  },
+  "https://en.onepiece-cardgame.com/events/2026/championship/": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Championship 26-27 | ONE PIECE CARD GAME - Official Web Site"
+  },
+  "https://en.onepiece-cardgame.com/events/2026/championship/store_championship_april.php": {
+   "depth": 2,
+   "found": "2026-11-11T22:31:12+00:00",
+   "name": "Click here for details of Season 1"
+  },
+  "https://en.onepiece-cardgame.com/events/2026/store-buddy-battle/": {
+   "depth": 2,
+   "found": "2026-11-11T22:31:09+00:00",
+   "name": "Official Shop Buddy Battle"
+  },
+  "https://en.onepiece-cardgame.com/events/2026/welcome-event/": {
+   "depth": 2,
+   "found": "2026-11-11T22:31:09+00:00",
+   "name": "Official Shop Welcome Event"
+  },
+  "https://en.onepiece-cardgame.com/events/26-27_Finals_Season_1.html": {
+   "depth": 2,
+   "found": "2026-11-11T22:31:12+00:00",
+   "name": "Click here for details of Finals"
+  },
+  "https://en.onepiece-cardgame.com/events/26-27_Finals_Season_2.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Championship 26-27 Finals Season 2"
+  },
+  "https://en.onepiece-cardgame.com/events/Finals-2026s2-lcq.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Championship 26-27 S2 Last Chance Qualifier"
+  },
+  "https://en.onepiece-cardgame.com/events/Finals-2026s2-side.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Championship 26-27 Finals Season 2 Side Event Matching Battle"
+  },
+  "https://en.onepiece-cardgame.com/events/bcgfest25-26-orlando.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "BANDAI CARD GAMES Fest 26-27 in ORLANDO"
+  },
+  "https://en.onepiece-cardgame.com/events/bcgfest26-27-london.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "BANDAI CARD GAMES Fest 26-27 in LONDON"
+  },
+  "https://en.onepiece-cardgame.com/events/bcgfest26-27.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "BANDAI CARD GAMES Fest 26-27"
+  },
+  "https://en.onepiece-cardgame.com/events/championship-26-27.html": {
+   "depth": 2,
+   "found": "2026-11-11T22:31:26+00:00",
+   "name": "Championship 26-27"
+  },
+  "https://en.onepiece-cardgame.com/events/extra-grand-battle-l-2026.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Extra Grand Battle 2026"
+  },
+  "https://en.onepiece-cardgame.com/events/flameflame_Coliseum.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Flame-Flame Fruit Coliseum"
+  },
+  "https://en.onepiece-cardgame.com/events/gencon2026.html": {
+   "depth": 2,
+   "found": "2026-11-11T22:31:35+00:00",
+   "name": "Gen Con Details"
+  },
+  "https://en.onepiece-cardgame.com/events/heroines-battle-vol2.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Heroines Battle Vol.2"
+  },
+  "https://en.onepiece-cardgame.com/events/malltour2026.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "ONE PIECE CARD GAME MALL TOUR 2026"
+  },
+  "https://en.onepiece-cardgame.com/events/official-shop-europe-de.html": {
+   "depth": 2,
+   "found": "2026-11-11T22:31:09+00:00",
+   "name": "Germany"
+  },
+  "https://en.onepiece-cardgame.com/events/official-shop-europe-uk.html": {
+   "depth": 2,
+   "found": "2026-11-11T22:31:09+00:00",
+   "name": "UK"
+  },
+  "https://en.onepiece-cardgame.com/events/official-shop-us-en.html": {
+   "depth": 2,
+   "found": "2026-11-11T22:31:09+00:00",
+   "name": "US"
+  },
+  "https://en.onepiece-cardgame.com/events/official-shop.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "OFFICIAL SHOP"
+  },
+  "https://en.onepiece-cardgame.com/events/pirates-party-vol4-2026.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Pirates Party 2026 Vol. 4"
+  },
+  "https://en.onepiece-cardgame.com/events/regional-season1-26-27.html": {
+   "depth": 2,
+   "found": "2026-11-11T22:31:12+00:00",
+   "name": "Click here for details of Season 1"
+  },
+  "https://en.onepiece-cardgame.com/events/regional-season2-26-27.html": {
+   "depth": 0,
+   "found": "2026-11-11T22:31:04+00:00",
+   "name": "Regionals Season 2 (26-27)",
+   "seed": true
+  },
+  "https://en.onepiece-cardgame.com/events/regional-season2-side.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Championship 26-27 Regionals Season 2 Side Event Prize Wall"
+  },
+  "https://en.onepiece-cardgame.com/events/store-tournament-op18.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "4th Anniversary Event (OP-18 Release Event)"
+  },
+  "https://en.onepiece-cardgame.com/events/storecs_october.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "CS26-27 Store Championship October (Season 2)"
+  },
+  "https://en.onepiece-cardgame.com/events/treasure-cup-august-2026.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Treasure Cup August 2026"
+  },
+  "https://en.onepiece-cardgame.com/events/treasure-cup-dec-2026.html": {
+   "depth": 1,
+   "found": "2026-11-11T22:31:05+00:00",
+   "name": "Treasure Cup December 2026"
+  }
  }
 }

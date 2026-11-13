@@ -7,6 +7,7 @@
   "https://en.onepiece-cardgame.com/events/": {
    "depth": 0,
    "found": "2026-11-11T22:31:04+00:00",
+   "last_change": "2026-11-13T12:34:22+00:00",
    "name": "Events page",
    "seed": true
   },
@@ -19,6 +20,11 @@
    "depth": 1,
    "found": "2026-11-11T22:31:05+00:00",
    "name": "Store Treasure Cup 2026 December"
+  },
+  "https://en.onepiece-cardgame.com/events/02_573.html": {
+   "depth": 1,
+   "found": "2026-11-13T12:33:17+00:00",
+   "name": "ONE PIECE CARD GAME NIKE Collaboration Tournament"
   },
   "https://en.onepiece-cardgame.com/events/2026/bcgfest26-27/dallas/": {
    "depth": 2,
@@ -160,6 +166,11 @@
    "depth": 1,
    "found": "2026-11-11T22:31:05+00:00",
    "name": "4th Anniversary Event (OP-18 Release Event)"
+  },
+  "https://en.onepiece-cardgame.com/events/store-tournament-st37-38.html": {
+   "depth": 1,
+   "found": "2026-11-13T12:33:17+00:00",
+   "name": "ST-37 & ST-38 Release Event"
   },
   "https://en.onepiece-cardgame.com/events/storecs_october.html": {
    "depth": 1,
